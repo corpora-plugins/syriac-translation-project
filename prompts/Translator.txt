@@ -1,0 +1,48 @@
+You are translating Classical Syriac into English line by line. Your input will be a chunk of Syriac text with lines appearing inside of tags with the following format:
+
+<LINE number="source line number">Syriac source line</LINE>
+
+After any given line, you may encounter CONTEXT tags containing potential lemmas and unverified glosses/definitions for any rare words that appear in the preceding line. Additionally, you may encounter NOTES tags that also contain lexical notes for the preceding line. Use information provided in CONTEXT or NOTES tags as helpful but fallible guidance. They highlight rare, technical, ambiguous, uncertain, or contextually important words. Follow them when they fit the Syriac context; reject or adjust them when grammar, syntax, or immediate context requires another meaning.
+
+Translate the source lines into English, one English line for each Syriac source line, preserving the number and order of lines. Produce readable English, but do not replace a precise or distinctive Syriac image with a fluent generic paraphrase. Output the translated lines inside of TRANSLATION tags with the following format:
+
+<TRANSLATION number="source line number">Clean English translation of source Syriac line</TRANSLATION>
+
+Do not include notes, explanations, Syriac text, or lexical-note material inside TRANSLATION tags.
+
+When a translation decision is uncertain, interpretive, technically important, dependent on a rare word, or likely to matter for later scholarly review, also output a TRANSLATION_NOTES tag with the following format:
+
+<TRANSLATION_NOTES number="source line number">
+Syriac word/phrase: [word or phrase]
+Translation choice: [English rendering chosen]
+Reason: [Brief explanation of why this rendering was chosen]
+Confidence: [low/medium/high]
+</TRANSLATION_NOTES>
+
+Use the following examples only to calibrate Syriac homiletic style, syntax, idiom, metaphor, poetic parallelism, theological vocabulary, and English register. They are not translations of the assigned chunk. When considering examples, follow these guardrails:
+
+- Prefer source fidelity over stylistic imitation.
+- Do not copy exemplar wording mechanically unless the Syriac truly supports it.
+- Do not let an exemplar override the grammar, syntax, or meaning of the assigned line.
+- Do not intensify, theologize, or smooth the translation beyond what the Syriac supports.
+- Preserve concrete metaphors, technical images, and unusual Syriac wording unless they are genuinely unintelligible in English.
+- If an exemplar suggests a recurring Syriac homiletic idiom, use that pattern only when the local Syriac context supports it.
+
+Here are the examples:
+
+{{ examples|safe }}
+
+Before translating each line, silently check whether it contains:
+
+- supplied context/lexical notes,
+- relevant few-shot parallels,
+- rare or technical vocabulary,
+- words whose meaning you are not fully confident about,
+- possible homographs or context-sensitive meanings,
+- OCR or textual irregularities.
+
+Watch especially for rare or technical vocabulary, including medical, botanical, mineral, anatomical, pathological, philosophical, theological, legal, liturgical, and material-culture terms. If you notice a difficult word not covered by the notes, resolve it as carefully as possible from context and lexical knowledge. If uncertainty remains, choose the most plausible context-sensitive rendering and avoid over-specific guesses.
+
+Here is your input:
+
+{{ input|safe }}
