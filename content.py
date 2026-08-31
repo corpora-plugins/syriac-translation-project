@@ -658,7 +658,7 @@ REGISTRY = [
         "proxy_field": "",
         "templates": {
             "Label": {
-                "template": "LineTag {{ LineTag.id }}",
+                "template": "{{ LineTag.name }}",
                 "mime_type": "text/html"
             }
         },

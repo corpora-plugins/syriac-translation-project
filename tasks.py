@@ -9,6 +9,15 @@ from corpus import Job
 
 LINE_CHUNK_SIZE = 30
 
+# Approximate Gemini API pricing in USD per 1,000,000 tokens. "Thinking" (thoughts)
+# tokens are billed at the output rate. Update these as Google changes pricing:
+# https://ai.google.dev/gemini-api/docs/pricing
+MODEL_PRICING = {
+    'gemini-3.5-flash': {'input': 1.50, 'output': 9.00},
+    'gemini-3.6-flash': {'input': 0.75, 'output': 3.75},
+}
+DEFAULT_PRICING = {'input': 0.30, 'output': 2.50}
+
 SYRIAC_RE = re.compile(r"[\u0700-\u074F\u0860-\u086F]")
 SYRIAC_MARKS_RE = re.compile(r"[\u0730-\u074A]")
 INVISIBLE_CHARS = str.maketrans("", "", "\ufeff\u200e\u200f\u061c") # deleting all characters in third parameter
@@ -22,7 +31,7 @@ reviewer_notes_RE = re.compile(r'<REVISION_NOTE\s+number=["\']?(\d+)["\']?\s*>(.
 
 REGISTRY = {
     "Translate Syriac Text": {
-        "version": "0.4",
+        "version": "0.6",
         "jobsite_type": "HUEY",
         "track_provenance": True,
         "create_report": True,
@@ -31,11 +40,12 @@ REGISTRY = {
             "parameters": {
                 "model": {
                     "label": "Gemini Model",
-                    "value": "gemini-3.5-flash",
+                    "value": "gemini-3.7-flash",
                     "type": "choice",
                     "choices": [
+                        "gemini-3.7-flash",
+                        'gemini-3.6-flash',
                         'gemini-3.5-flash',
-                        'gemini-3.6-flash'
                     ]
                 },
                 "thinking_level": {
@@ -43,10 +53,10 @@ REGISTRY = {
                     "value": "high",
                     "type": "choice",
                     "choices": [
-                        'minimal',
-                        'low',
+                        'high',
                         'medium',
-                        'high'
+                        'low',
+                        'minimal',
                     ]
                 },
                 "scope": {
@@ -76,6 +86,7 @@ def translate_syriac_text(job_id):
     thinking_level = job.get_param_value('thinking_level')
     scope = job.get_param_value('scope')
     total_lines = 0
+    usage_totals = new_usage_totals()
 
     job.set_status('running')
 
@@ -108,15 +119,19 @@ def translate_syriac_text(job_id):
 
         if scope in ['full', 'lexical notes only']:
             # use AI to create lexical notes
-            create_lexical_notes(job, gemini_client, model, thinking_config)
+            create_lexical_notes(job, gemini_client, model, thinking_config, usage_totals)
 
         if scope in ['full', 'translations only']:
             # use AI to translate the lines
-            create_translations(job, gemini_client, model, thinking_config)
+            create_translations(job, gemini_client, model, thinking_config, usage_totals)
 
         if scope in ['full', 'revisions only']:
             # use AI to review translations
-            review_lines(job, gemini_client, model, thinking_config)
+            review_lines(job, gemini_client, model, thinking_config, usage_totals)
+
+        # report an estimate of what the Gemini API calls for this job cost
+        if usage_totals['api_calls']:
+            job.report(format_cost_report(model, usage_totals, "Estimated total Gemini API cost for this job"))
 
     else:
         job.report(f'Either rare word detection failed or no pre-existing lines were found for performing {scope}!')
@@ -171,7 +186,7 @@ def create_syriac_lines(job):
     return total_lines
 
 
-def create_lexical_notes(job, gemini_client, model, thinking_config):
+def create_lexical_notes(job, gemini_client, model, thinking_config, usage_totals=None):
     corpus = job.corpus
     syriac_text = job.content
     stage = 2
@@ -192,7 +207,8 @@ def create_lexical_notes(job, gemini_client, model, thinking_config):
         model,
         thinking_config,
         prompt,
-        {}
+        {},
+        usage_totals=usage_totals
     )
 
     for line in syriac_lines:
@@ -204,7 +220,7 @@ def create_lexical_notes(job, gemini_client, model, thinking_config):
     job.report(f"Completed stage 1: {lexical_notes_created} lexical notes created.")
 
 
-def create_translations(job, gemini_client, model, thinking_config):
+def create_translations(job, gemini_client, model, thinking_config, usage_totals=None):
     corpus = job.corpus
     syriac_text = job.content
     stage = 3
@@ -234,7 +250,8 @@ def create_translations(job, gemini_client, model, thinking_config):
         model,
         thinking_config,
         prompt,
-        {'examples': '\n\n'.join(example_blocks)}
+        {'examples': '\n\n'.join(example_blocks)},
+        usage_totals=usage_totals
     )
 
     for line in syriac_lines:
@@ -257,7 +274,7 @@ def create_translations(job, gemini_client, model, thinking_config):
     job.report(f"Completed stage 2: {lines_translated} lines translated and {translator_notes_created} translator notes created.")
 
 
-def review_lines(job, gemini_client, model, thinking_config):
+def review_lines(job, gemini_client, model, thinking_config, usage_totals=None):
     corpus = job.corpus
     syriac_text = job.content
     stage = 4
@@ -280,7 +297,8 @@ def review_lines(job, gemini_client, model, thinking_config):
         thinking_config,
         prompt,
         {},
-        True
+        True,
+        usage_totals=usage_totals
     )
 
     for line in syriac_lines:
@@ -385,7 +403,7 @@ def gather_input(line_chunk, input_stats, gather_translations=False):
     return chunk_input
 
 
-def run_lines_through_model(job, stage, syriac_lines, gemini_client, model, thinking_config, prompt, context={}, gather_translations=False):
+def run_lines_through_model(job, stage, syriac_lines, gemini_client, model, thinking_config, prompt, context={}, gather_translations=False, usage_totals=None):
     input_stats = {
         'lines': 0,
         'rare_words': 0,
@@ -393,6 +411,7 @@ def run_lines_through_model(job, stage, syriac_lines, gemini_client, model, thin
         'translator_notes': 0,
         'mandatory_revisions': 0,
     }
+    stage_usage = new_usage_totals()
     line_deliverables = {}
     total_lines = syriac_lines.count()
 
@@ -415,6 +434,7 @@ def run_lines_through_model(job, stage, syriac_lines, gemini_client, model, thin
                 contents=chunk_prompt,
                 config=thinking_config,
             )
+            accumulate_usage(getattr(response, 'usage_metadata', None), stage_usage)
             model_output = response.text
         except:
             job.report(f"An error occurred while prompting {model} using {LINE_CHUNK_SIZE} lines starting at line {line_start + 1}:\n\n{traceback.format_exc()}")
@@ -428,6 +448,13 @@ def run_lines_through_model(job, stage, syriac_lines, gemini_client, model, thin
         report_percent_complete(job, stage, input_stats['lines'], total_lines)
 
     job.report(f"Input stats for stage {stage}: \n{json.dumps(input_stats, indent=4)}")
+
+    # roll this stage's token usage into the job-wide totals and report a per-stage cost estimate
+    if usage_totals is not None:
+        for key, value in stage_usage.items():
+            usage_totals[key] += value
+    if stage_usage['api_calls']:
+        job.report(format_cost_report(model, stage_usage, f"Estimated Gemini API cost for stage {stage}"))
 
     return line_deliverables
 
@@ -468,6 +495,49 @@ def parse_model_output(output, line_deliverables):
         line_number = int(number)
         ensure_data_structure(line_number)
         line_deliverables[line_number]['reviewer_notes'].append(body.strip())
+
+
+def new_usage_totals():
+    return {
+        'api_calls': 0,
+        'prompt_tokens': 0,
+        'candidates_tokens': 0,
+        'thoughts_tokens': 0,
+    }
+
+
+def accumulate_usage(usage_metadata, usage):
+    # tallies token counts from a single Gemini response's usage_metadata
+    usage['api_calls'] += 1
+    if not usage_metadata:
+        return
+    usage['prompt_tokens'] += getattr(usage_metadata, 'prompt_token_count', 0) or 0
+    usage['candidates_tokens'] += getattr(usage_metadata, 'candidates_token_count', 0) or 0
+    usage['thoughts_tokens'] += getattr(usage_metadata, 'thoughts_token_count', 0) or 0
+
+
+def format_cost_report(model, usage, label):
+    # thinking tokens are billed at the output rate, so they're folded into output_tokens
+    pricing = MODEL_PRICING.get(model, DEFAULT_PRICING)
+    input_tokens = usage['prompt_tokens']
+    output_tokens = usage['candidates_tokens'] + usage['thoughts_tokens']
+    input_cost = input_tokens / 1_000_000 * pricing['input']
+    output_cost = output_tokens / 1_000_000 * pricing['output']
+    total_cost = input_cost + output_cost
+    rates_note = '' if model in MODEL_PRICING else ' (not in MODEL_PRICING - using default rates)'
+
+    return (
+        f"{label}\n"
+        f"{'=' * len(label)}\n"
+        f"Model: {model}{rates_note}\n"
+        f"Gemini API calls: {usage['api_calls']}\n\n"
+        f"Input tokens:  {input_tokens:>12,}  @ ${pricing['input']:.3f}/1M  = ${input_cost:.4f}\n"
+        f"Output tokens: {output_tokens:>12,}  @ ${pricing['output']:.3f}/1M  = ${output_cost:.4f}\n"
+        f"  (includes {usage['thoughts_tokens']:,} thinking tokens billed at the output rate)\n\n"
+        f"Estimated cost: ${total_cost:.4f}\n\n"
+        f"Pricing is approximate and set in tasks.py (MODEL_PRICING / DEFAULT_PRICING). "
+        f"Free-tier quotas and tiered long-context pricing are not accounted for."
+    )
 
 
 def prepare_prompt_for_report(prompt):
