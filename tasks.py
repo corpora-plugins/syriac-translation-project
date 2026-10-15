@@ -40,10 +40,10 @@ REGISTRY = {
             "parameters": {
                 "model": {
                     "label": "Gemini Model",
-                    "value": "gemini-3.7-flash",
+                    "value": "gemini-3.8-flash",
                     "type": "choice",
                     "choices": [
-                        "gemini-3.7-flash",
+                        "gemini-3.8-flash",
                         'gemini-3.6-flash',
                         'gemini-3.5-flash',
                     ]
